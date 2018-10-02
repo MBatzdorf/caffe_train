@@ -215,6 +215,25 @@ void CPMDataTransformer<Dtype>::TransformJoints(Joints& j) {
     }
   }
 
+  else if(np == 27){
+    int COCO_to_ours_1[7] = {1,2,3,4,5,6,7};
+    int COCO_to_ours_2[7] = {1,2,3,4,5,6,7};
+    jo.joints.resize(np);
+    jo.isVisible.resize(np);
+    for(int i=0;i<7;i++){
+      jo.joints[i] = (j.joints[COCO_to_ours_1[i]-1] + j.joints[COCO_to_ours_2[i]-1]) * 0.5;
+      if(j.isVisible[COCO_to_ours_1[i]-1]==2 || j.isVisible[COCO_to_ours_2[i]-1]==2){
+        jo.isVisible[i] = 2;
+      }
+      else if(j.isVisible[COCO_to_ours_1[i]-1]==3 || j.isVisible[COCO_to_ours_2[i]-1]==3){
+        jo.isVisible[i] = 3;
+      }
+      else {
+        jo.isVisible[i] = j.isVisible[COCO_to_ours_1[i]-1] && j.isVisible[COCO_to_ours_2[i]-1];
+      }
+    }
+  }
+
   j = jo;
 }
 
@@ -923,6 +942,21 @@ void CPMDataTransformer<Dtype>::swapLeftRight(Joints& j) {
       j.isVisible[li] = temp_v;
     }
   }
+
+  else if(np == 27){
+    int right[2] = {3,6};
+    int left[2] =  {4,7};
+    for(int i=0; i<2; i++){
+      int ri = right[i] - 1;
+      int li = left[i] - 1;
+      Point2f temp = j.joints[ri];
+      j.joints[ri] = j.joints[li];
+      j.joints[li] = temp;
+      int temp_v = j.isVisible[ri];
+      j.isVisible[ri] = j.isVisible[li];
+      j.isVisible[li] = temp_v;
+    }
+  }
 }
 
 template<typename Dtype>
@@ -1251,6 +1285,59 @@ void CPMDataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& 
         float maximum = 0;
         //second background channel
         for (int i = np+29; i < np+44; i++){
+          maximum = (maximum > transformed_label[i*channelOffset + g_y*grid_x + g_x]) ? maximum : transformed_label[i*channelOffset + g_y*grid_x + g_x];
+        }
+        transformed_label[(2*np+1)*channelOffset + g_y*grid_x + g_x] = max(1.0-maximum, 0.0);
+      }
+    }
+    //LOG(INFO) << "background put";
+  }
+
+  else if (np == 27){
+    for (int i = 0; i < 7; i++){
+      Point2f center = meta.joint_self.joints[i];
+      if(meta.joint_self.isVisible[i] <= 1){
+        putGaussianMaps(transformed_label + (i+np+21)*channelOffset, center, param_.stride(),
+                        grid_x, grid_y, param_.sigma()); //self
+      }
+      for(int j = 0; j < meta.numOtherPeople; j++){ //for every other person
+        Point2f center = meta.joint_others[j].joints[i];
+        if(meta.joint_others[j].isVisible[i] <= 1){
+          putGaussianMaps(transformed_label + (i+np+21)*channelOffset, center, param_.stride(),
+                          grid_x, grid_y, param_.sigma());
+        }
+      }
+    }
+
+    int mid_1[10] = {2, 3, 4, 2, 2, 2, 5, 5, 3, 4};
+    int mid_2[10] = {1, 1, 1, 3, 4, 5, 6, 7, 6, 7};
+    int thre = 1;
+
+    for(int i=0;i<10;i++){
+      Mat count = Mat::zeros(grid_y, grid_x, CV_8UC1);
+      Joints jo = meta.joint_self;
+      if(jo.isVisible[mid_1[i]-1]<=1 && jo.isVisible[mid_2[i]-1]<=1){
+        //putVecPeaks
+        putVecMaps(transformed_label + (np+ 1+ 2*i)*channelOffset, transformed_label + (np+ 2+ 2*i)*channelOffset,
+                  count, jo.joints[mid_1[i]-1], jo.joints[mid_2[i]-1], param_.stride(), grid_x, grid_y, param_.sigma(), thre); //self
+      }
+
+      for(int j = 0; j < meta.numOtherPeople; j++){ //for every other person
+        Joints jo2 = meta.joint_others[j];
+        if(jo2.isVisible[mid_1[i]-1]<=1 && jo2.isVisible[mid_2[i]-1]<=1){
+          //putVecPeaks
+          putVecMaps(transformed_label + (np+ 1+ 2*i)*channelOffset, transformed_label + (np+ 2+ 2*i)*channelOffset,
+                  count, jo2.joints[mid_1[i]-1], jo2.joints[mid_2[i]-1], param_.stride(), grid_x, grid_y, param_.sigma(), thre); //self
+        }
+      }
+    }
+
+    //put background channel
+    for (int g_y = 0; g_y < grid_y; g_y++){
+      for (int g_x = 0; g_x < grid_x; g_x++){
+        float maximum = 0;
+        //second background channel
+        for (int i = np+21; i < np+28; i++){
           maximum = (maximum > transformed_label[i*channelOffset + g_y*grid_x + g_x]) ? maximum : transformed_label[i*channelOffset + g_y*grid_x + g_x];
         }
         transformed_label[(2*np+1)*channelOffset + g_y*grid_x + g_x] = max(1.0-maximum, 0.0);

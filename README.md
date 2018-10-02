@@ -29,8 +29,8 @@ layer {
     target_dist: 0.6
     center_perterb_max: 40
     do_clahe: false
-    num_parts: 56
-    np_in_lmdb: 17
+    num_parts: 27
+    np_in_lmdb: 7
   }
 }
 ```
