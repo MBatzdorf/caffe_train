@@ -69,7 +69,7 @@ void CPMDataTransformer<Dtype>::ReadMetaData(MetaData& meta, const string& data,
     cur_epoch++;
   }
   meta.epoch = cur_epoch;
-  if(meta.write_number % 1000 == 0){
+  if(meta.write_number % 500 == 0){
     LOG(INFO) << "dataset: " << meta.dataset <<"; img_size: " << meta.img_size
         << "; meta.annolist_index: " << meta.annolist_index << "; meta.write_number: " << meta.write_number
         << "; meta.total_write_number: " << meta.total_write_number << "; meta.epoch: " << meta.epoch;
@@ -103,7 +103,7 @@ void CPMDataTransformer<Dtype>::ReadMetaData(MetaData& meta, const string& data,
         meta.joint_self.isVisible[i] = 2; // 2 means cropped, 0 means occluded by still on image
       }
     }
-    //LOG(INFO) << meta.joint_self.joints[i].x << " " << meta.joint_self.joints[i].y << " " << meta.joint_self.isVisible[i];
+    //LOG(INFO) << "Joint x: " << meta.joint_self.joints[i].x << " " << "Joint y: " << meta.joint_self.joints[i].y << " " << "visibility: " << meta.joint_self.isVisible[i];
   }
   
   //others (7 lines loaded)
@@ -179,6 +179,7 @@ void CPMDataTransformer<Dtype>::TransformJoints(Joints& j) {
   //transform joints in meta from np_in_lmdb (specified in prototxt) to np (specified in prototxt)
   Joints jo = j;
 
+
   if(np == 56){
     int COCO_to_ours_1[18] = {1,6, 7,9,11, 6,8,10, 13,15,17, 12,14,16, 3,2,5,4};
     int COCO_to_ours_2[18] = {1,7, 7,9,11, 6,8,10, 13,15,17, 12,14,16, 3,2,5,4};
@@ -197,7 +198,6 @@ void CPMDataTransformer<Dtype>::TransformJoints(Joints& j) {
       }
     }
   }
-
   else if(np == 43){
     int MPI_to_ours_1[15] = {9, 8,12,11,10,13,14,15, 2, 1, 0, 3, 4, 5, 7};
     int MPI_to_ours_2[15] = {9, 8,12,11,10,13,14,15, 2, 1, 0, 3, 4, 5, 6};
@@ -214,7 +214,7 @@ void CPMDataTransformer<Dtype>::TransformJoints(Joints& j) {
       }
     }
   }
-
+  // Support for 7 pen keypoints
   else if(np == 27){
     int COCO_to_ours_1[7] = {1,2,3,4,5,6,7};
     int COCO_to_ours_2[7] = {1,2,3,4,5,6,7};
@@ -638,9 +638,9 @@ template<typename Dtype> void CPMDataTransformer<Dtype>::Transform_nv(const Datu
 
   VLOG(2) << "  putGauss+genLabel: " << timer1.MicroSeconds()/1000.0 << " ms";
   //starts to visualize everything (transformed_data in 4 ch, label) fed into conv1
-  //if(param_.visualize()){
-    //dumpEverything(transformed_data, transformed_label, meta);
-  //}
+  if(param_.visualize()){
+    dumpEverything(transformed_data, transformed_label, meta);
+  }
 }
 
 
@@ -913,6 +913,7 @@ Size CPMDataTransformer<Dtype>::augmentation_croppad(Mat& img_src, Mat& img_dst,
 
 template<typename Dtype>
 void CPMDataTransformer<Dtype>::swapLeftRight(Joints& j) {
+
   if(np == 56){
     int right[8] = {3,4,5, 9,10,11,15,17}; 
     int left[8] =  {6,7,8,12,13,14,16,18}; 
@@ -927,7 +928,6 @@ void CPMDataTransformer<Dtype>::swapLeftRight(Joints& j) {
       j.isVisible[li] = temp_v;
     }
   }
-
   else if(np == 43){
     int right[6] = {3,4,5,9,10,11}; 
     int left[6] = {6,7,8,12,13,14}; 
@@ -942,7 +942,7 @@ void CPMDataTransformer<Dtype>::swapLeftRight(Joints& j) {
       j.isVisible[li] = temp_v;
     }
   }
-
+  // Support for 7 pen keypoints
   else if(np == 27){
     int right[2] = {3,6};
     int left[2] =  {4,7};
@@ -1064,7 +1064,11 @@ void CPMDataTransformer<Dtype>::putGaussianMaps(Dtype* entry, Point2f center, in
       if(exponent > 4.6052){ //ln(100) = -ln(1%)
         continue;
       }
-      entry[g_y*grid_x + g_x] += exp(-exponent);
+      // We do it like in paper
+      //entry[g_y*grid_x + g_x] += exp(-exponent);
+      double newVal = exp(-exponent);
+      double current = entry[g_y*grid_x + g_x];
+      entry[g_y*grid_x + g_x] = max(current, newVal);
       if(entry[g_y*grid_x + g_x] > 1) 
         entry[g_y*grid_x + g_x] = 1;
     }
@@ -1126,6 +1130,13 @@ void CPMDataTransformer<Dtype>::putVecMaps(Dtype* entryX, Dtype* entryY, Mat& co
   int max_y = std::min( int(round(std::max(centerA.y, centerB.y)+thre)), grid_y);
 
   float norm_bc = sqrt(bc.x*bc.x + bc.y*bc.y);
+
+  if(norm_bc == 0)
+  {
+    LOG(INFO) << "putVecMaps norm is zero -> skip this entry ";
+    return;
+  }
+
   bc.x = bc.x /norm_bc;
   bc.y = bc.y /norm_bc;
 
@@ -1239,7 +1250,6 @@ void CPMDataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& 
     }
     //LOG(INFO) << "background put";
   }
-  
   else if (np == 43){
     for (int i = 0; i < 15; i++){
       Point2f center = meta.joint_self.joints[i];
@@ -1292,7 +1302,7 @@ void CPMDataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& 
     }
     //LOG(INFO) << "background put";
   }
-
+  // Support for 7 pen keypoints
   else if (np == 27){
     for (int i = 0; i < 7; i++){
       Point2f center = meta.joint_self.joints[i];
@@ -1368,7 +1378,7 @@ void CPMDataTransformer<Dtype>::generateLabelMap(Dtype* transformed_label, Mat& 
       //circle(label_map, center, 3, CV_RGB(255,0,255), -1);
       char imagename [100];
       sprintf(imagename, "augment_%04d_label_part_%02d.jpg", meta.write_number, i);
-      //LOG(INFO) << "filename is " << imagename;
+      LOG(INFO) << "filename is " << imagename;
       imwrite(imagename, label_map);
     }
     
